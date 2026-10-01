@@ -17,6 +17,7 @@ Copy the `SpeechGates` folder as a mod (MO2 mod, or add its folder as a `data=` 
 ## Settings
 Edit the `CONFIG` table at the top of `scripts/SpeechGates/player.lua`:
 - `requireEffect` (default on) - only list responses whose result script advances a quest, adds a topic or moves items; plain flavour lines that merely differ by disposition are skipped. Matching quests show an `Advances: <quest name>` line.
+- `maxTopics` - most topics listed at once (the rest show as `+ N more`).
 - `debug` - print each listed response and its result script to `openmw.log`.
 - `showMetGates` - also list requirements you already meet.
 - `unrevealedTopics` - undiscovered topics: `'obscure'` (default), `'hide'`, or `'show'`.

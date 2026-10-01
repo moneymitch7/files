@@ -26,6 +26,7 @@ local CONFIG = {
     requireEffect = true,
     -- Print each listed response (id, result script) to openmw.log.
     debug = false,
+    maxTopics = 8, -- most topics listed at once
     showMetGates = true, -- also list requirements you already meet (in green)
     -- Topics you have not discovered yet (see README, "Known topics"):
     --   'obscure' = show a blurred hint, 'hide' = omit, 'show' = show normally.
@@ -140,8 +141,11 @@ local function questName(questId)
     return ok and rec and rec.questName or nil
 end
 
+local topicSet, maxWords = {}, 1
+
 local function buildIndex()
     index = {}
+    topicSet, maxWords = {}, 1
     for _, topic in ipairs(core.dialogue.topic.records) do
         for _, info in ipairs(topic.infos) do
             local conds = info.conditions
@@ -156,6 +160,11 @@ local function buildIndex()
                 end
                 local disp = info.filterActorDisposition or 0
                 if #journal > 0 and (#gates > 0 or disp > 0) then
+                    if not topicSet[topic.id] then
+                        topicSet[topic.id] = true
+                        local _, spaces = topic.id:gsub(' ', '')
+                        maxWords = math.max(maxWords, math.min(spaces + 1, 6))
+                    end
                     index[#index + 1] = {
                         topic = topic.name, topicId = topic.id, info = info,
                         gates = gates, journal = journal, disposition = disp,
@@ -179,24 +188,28 @@ end
 local learned = {} -- topic id -> true
 local seeded = false
 
-local function containsWord(text, word)
-    local init = 1
-    while true do
-        local a, b = text:find(word, init, true)
-        if not a then return false end
-        local before = a > 1 and text:sub(a - 1, a - 1) or ' '
-        local after = b < #text and text:sub(b + 1, b + 1) or ' '
-        if not before:match('[%w]') and not after:match('[%w]') then return true end
-        init = a + 1
-    end
-end
+-- Cost control: the index holds thousands of entries and a journal can hold
+-- thousands of texts, so a text is NOT compared against every topic. Instead its
+-- words are looked up as 1..maxWords-word phrases in a set of topic names, and
+-- the total work per call is capped (OpenMW aborts a script call that runs more
+-- than the "[Lua] instruction limit per call" setting).
+local WORD_BUDGET = 400000
+local wordsLeft = WORD_BUDGET
 
 local function scanText(text)
-    if not text or not index then return end
-    text = text:lower()
-    for _, entry in ipairs(index) do
-        if not learned[entry.topicId] and containsWord(text, entry.topicId) then
-            learned[entry.topicId] = true
+    if not text or wordsLeft <= 0 then return end
+    local words, n = {}, 0
+    for w in text:lower():gmatch("[%w'%-]+") do
+        n = n + 1
+        words[n] = w
+    end
+    wordsLeft = wordsLeft - n
+    for i = 1, n do
+        local phrase = words[i]
+        if topicSet[phrase] then learned[phrase] = true end
+        for j = i + 1, math.min(i + maxWords - 1, n) do
+            phrase = phrase .. ' ' .. words[j]
+            if topicSet[phrase] then learned[phrase] = true end
         end
     end
 end
@@ -204,11 +217,9 @@ end
 local function seedLearned()
     seeded = true
     if not index then buildIndex() end
+    wordsLeft = WORD_BUDGET
     local ok, err = pcall(function()
-        for _, topic in pairs(types.Player.journal(self).topics) do
-            learned[topic.id] = true
-            for _, e in ipairs(topic.entries) do scanText(e.text) end
-        end
+        -- quest stages reached (few texts) first, then the topic entries
         for questId, q in pairs(types.Player.quests(self)) do
             local rec = core.dialogue.journal.records[questId]
             if rec and q.stage then
@@ -216,6 +227,10 @@ local function seedLearned()
                     if info.questStage and info.questStage <= q.stage then scanText(info.text) end
                 end
             end
+        end
+        for _, topic in pairs(types.Player.journal(self).topics) do
+            learned[topic.id] = true
+            for _, e in ipairs(topic.entries) do scanText(e.text) end
         end
     end)
     if not ok then print('[SpeechGates] seeding known topics failed: ' .. tostring(err)) end
@@ -231,9 +246,7 @@ end
 
 local function lower(s) return s and tostring(s):lower() or nil end
 
-local function actorMatches(actor, info)
-    local rec = types.NPC.record(actor)
-    if not rec then return false end
+local function actorMatches(actor, rec, info)
     local id = lower(info.filterActorId)
     if id and id ~= lower(actor.recordId) then return false end
     local race = lower(info.filterActorRace)
@@ -268,13 +281,15 @@ local function evaluate(actor)
     local quests = types.Player.quests(self)
     if not seeded then seedLearned() end
     local disposition = types.NPC.getDisposition(actor, self)
+    local actorRecord = types.NPC.record(actor)
+    if not actorRecord then return {}, {}, disposition end
 
     local byTopic, order, seen = {}, {}, {}
     for _, entry in ipairs(index) do
         local revealed = isRevealed(entry.topicId)
         if (revealed or CONFIG.unrevealedTopics ~= 'hide')
             and (entry.effect or not CONFIG.requireEffect)
-            and actorMatches(actor, entry.info) and questRelevant(entry, quests) then
+            and questRelevant(entry, quests) and actorMatches(actor, actorRecord, entry.info) then
             local lines, locked = {}, false
             for _, c in ipairs(entry.gates) do
                 local g = gateTypes[c.type]
@@ -313,7 +328,11 @@ local function evaluate(actor)
         end
     end
     table.sort(order)
-    return order, byTopic, disposition
+    local extra = #order - CONFIG.maxTopics
+    if extra > 0 then
+        for i = #order, CONFIG.maxTopics + 1, -1 do order[i] = nil end
+    end
+    return order, byTopic, disposition, math.max(extra, 0)
 end
 
 ---------------------------------------------------------------------------
@@ -497,7 +516,7 @@ end
 local function refresh()
     destroyPanel()
     if not currentActor or not currentActor:isValid() or currentActor.type ~= types.NPC then return end
-    local order, byTopic, disposition = evaluate(currentActor)
+    local order, byTopic, disposition, extra = evaluate(currentActor)
     if #order == 0 then return end
 
     local minWidth = math.floor(ui.screenSize().x * CONFIG.minWidth)
@@ -529,6 +548,8 @@ local function refresh()
             rows[#rows + 1] = text('???', HINT)
         end
     end
+
+    if extra > 0 then rows[#rows + 1] = text(string.format('+ %d more', extra), HINT) end
 
     panel = ui.create {
         layer = 'Windows',
@@ -573,6 +594,7 @@ local function onDialogueResponse(e)
             if rec then
                 for _, info in ipairs(rec.infos) do
                     if info.id == e.infoId then
+                        wordsLeft = 20000
                         scanText(info.text)
                         break
                     end
@@ -583,6 +605,21 @@ local function onDialogueResponse(e)
     if panel or currentActor then safeRefresh() end
 end
 
+-- Build the index in its own engine call (load / new game) instead of during the
+-- first dialogue, so no single call has to do all the work.
+local function prebuild()
+    if index then return end
+    local ok, err = pcall(buildIndex)
+    if not ok then
+        index = nil
+        print('[SpeechGates] index build failed: ' .. tostring(err))
+    end
+end
+
+local function onInit()
+    prebuild()
+end
+
 local function onSave()
     return { learned = learned }
 end
@@ -590,10 +627,11 @@ end
 local function onLoad(data)
     learned = data and data.learned or {}
     seeded = false
+    prebuild()
 end
 
 return {
-    engineHandlers = { onSave = onSave, onLoad = onLoad },
+    engineHandlers = { onInit = onInit, onSave = onSave, onLoad = onLoad },
     eventHandlers = {
         UiModeChanged = onUiModeChanged,
         DialogueResponse = onDialogueResponse,
