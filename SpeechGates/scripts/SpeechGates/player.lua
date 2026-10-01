@@ -282,6 +282,11 @@ local function questRelevant(entry, quests)
     return anyActive
 end
 
+local function dispPerPersonality()
+    local ok, v = pcall(core.getGMST, 'fDispPersonalityMult')
+    return (ok and type(v) == 'number' and v > 0) and v or 0.5
+end
+
 local function evaluate(actor)
     if not index then buildIndex() end
     local quests = types.Player.quests(self)
@@ -309,6 +314,14 @@ local function evaluate(actor)
                 locked = locked or not met
                 lines[#lines + 1] = {
                     text = string.format('Disposition %d', entry.disposition), met = met }
+                if not met then
+                    -- Derived disposition rises by fDispPersonalityMult per point of
+                    -- Personality (same formula the engine uses), so the Personality
+                    -- needed to close the gap is exact, other things being equal.
+                    local personality = types.Actor.stats.attributes.personality(self).modified
+                    local needed = personality + math.ceil((entry.disposition - disposition) / dispPerPersonality())
+                    lines[#lines + 1] = { text = string.format('Personality %d / %d', personality, needed), met = false }
+                end
             end
             if CONFIG.debug then
                 print(string.format('[SpeechGates] %s / info %s | effect=%s | script=%s', entry.topicId,
@@ -517,7 +530,7 @@ local function refresh()
     if #order == 0 then return end
 
     -- Rows, top to bottom. Each is a layout that gets an absolute position.
-    local rows = { text('Requirements', HEADER), text('Disposition: ' .. disposition, HEADER) }
+    local rows = { text('Requirements', HEADER) }
     for _, topic in ipairs(order) do
         local t = byTopic[topic]
         if t.revealed or CONFIG.unrevealedTopics == 'show' then

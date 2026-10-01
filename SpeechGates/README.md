@@ -6,7 +6,8 @@ While the dialogue window is open, a small panel lists responses that are tied t
 Requirements
 Rumors
    Speechcraft 38 / 45        <- red: not met
-   Disposition 60               <- green: met
+   Disposition 60               <- red: not met
+   Personality 55 / 62          <- Personality that would close the gap
 ```
 
 Event-driven only: nothing runs per frame. Work happens when the dialogue window opens and after each dialogue response. The requirement index is built once, on your first dialogue after launch.
