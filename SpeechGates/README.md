@@ -17,7 +17,8 @@ Copy the `SpeechGates` folder as a mod (MO2 mod, or add its folder as a `data=` 
 ## Settings
 Edit the `CONFIG` table at the top of `scripts/SpeechGates/player.lua`:
 - `showMetGates` - also list requirements you already meet.
-- `unrevealedTopics` - topics not yet in your journal topic list: `'obscure'` (grey `???`, default), `'hide'`, or `'show'`.
+- `unrevealedTopics` - topics not yet in your journal topic list: `'obscure'` (default; smudge bars, or grey `???` with `blurStyle = 'text'`), `'hide'`, or `'show'`.
+- `blurStyle` / `smudgeFixedWidth` - look of obscured topics.
 - `position` / `anchor` - screen placement (fractions of the screen).
 
 ## Limits

@@ -21,8 +21,12 @@ local CONFIG = {
     textSize = 16,
     showMetGates = true, -- also list requirements you already meet (in green)
     -- Topics you have not talked about yet (not in your journal topic list):
-    --   'obscure' = show a grey "???" hint, 'hide' = omit, 'show' = show normally.
+    --   'obscure' = show a smudged hint, 'hide' = omit, 'show' = show normally.
     unrevealedTopics = 'obscure',
+    -- How 'obscure' looks: 'bars' = soft smudge bars (name length hinted),
+    -- 'text' = a grey "???".
+    blurStyle = 'bars',
+    smudgeFixedWidth = false, -- true: every bar the same width (hides name length)
     -- Panel placement as a fraction of the screen. The panel grows upward from
     -- this point (anchor bottom-centre), by default above the topic column.
     position = { x = 0.745, y = 0.52 },
@@ -234,6 +238,31 @@ local function text(str, color)
     return { type = ui.TYPE.Text, props = { text = str, textSize = CONFIG.textSize, textColor = color } }
 end
 
+local barTexture = ui.texture { path = 'white' }
+
+-- A soft translucent bar standing in for blurred text of roughly `chars` letters.
+local function smudge(chars, indent)
+    local height = CONFIG.textSize + 2
+    local width = (CONFIG.smudgeFixedWidth and 14 or math.max(4, math.min(chars, 28))) * CONFIG.textSize * 0.5
+    return {
+        props = { size = util.vector2(width + indent, height) },
+        content = ui.content {
+            {
+                type = ui.TYPE.Image,
+                props = {
+                    resource = barTexture,
+                    color = HINT,
+                    alpha = 0.3,
+                    position = util.vector2(indent, 0),
+                    size = util.vector2(width, height * 0.6),
+                    anchor = util.vector2(0, 0),
+                    relativePosition = util.vector2(0, 0.2),
+                },
+            },
+        },
+    }
+end
+
 local function destroyPanel()
     if panel then
         panel:destroy()
@@ -259,6 +288,11 @@ local function refresh()
                 for _, l in ipairs(lines) do
                     rows[#rows + 1] = text('   ' .. l.text, l.met and MET or UNMET)
                 end
+            end
+        elseif CONFIG.blurStyle == 'bars' then
+            rows[#rows + 1] = smudge(#topic, 0)
+            for _ in ipairs(t[1]) do
+                rows[#rows + 1] = smudge(14, CONFIG.textSize)
             end
         else
             rows[#rows + 1] = text('???', HINT)
