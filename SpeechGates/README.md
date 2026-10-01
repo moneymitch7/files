@@ -21,7 +21,7 @@ Edit the `CONFIG` table at the top of `scripts/SpeechGates/player.lua`:
 - `showMetGates` - also list requirements you already meet.
 - `unrevealedTopics` - undiscovered topics: `'obscure'` (default), `'hide'`, or `'show'`.
 - `blurStyle` - how obscured topics look: `'smear'` (soft blurred scrambled text, default), `'bars'`, or `'text'` (`???`).
-- `boxStyle` - `'ir'` (default) rebuilds Interface Reimagined's fade box (the box its dialogue window uses) from its textures when they are installed; `'ir'` forces it; `'vanilla'` uses the stock OpenMW box.
+- `boxStyle` - `'ir'` (default) rebuilds Interface Reimagined's fade box (the box its dialogue window uses) from its textures; `'auto'` does so only when the textures are found, otherwise the stock box; `'vanilla'` always uses the stock box.
 - `position` / `anchor` / `minWidth` - placement (fractions of the screen). The default sits directly above the dialogue window's topic column.
 
 ## Known topics
