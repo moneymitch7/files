@@ -20,6 +20,12 @@ local vfs = require('openmw.vfs')
 
 local CONFIG = {
     textSize = 16,
+    -- Only list responses that actually do something: their result script
+    -- advances a journal quest, adds a topic, or gives/takes items. Plain
+    -- flavour lines that merely differ by disposition are skipped.
+    requireEffect = true,
+    -- Print each listed response (id, result script) to openmw.log.
+    debug = false,
     showMetGates = true, -- also list requirements you already meet (in green)
     -- Topics you have not discovered yet (see README, "Known topics"):
     --   'obscure' = show a blurred hint, 'hide' = omit, 'show' = show normally.
@@ -29,7 +35,7 @@ local CONFIG = {
     blurStyle = 'smear',
     -- Panel box: 'auto' uses the Interface Reimagined fade box when its textures
     -- are installed, 'ir' forces it, 'vanilla' uses the stock OpenMW box.
-    boxStyle = 'auto',
+    boxStyle = 'ir',
     -- Placement as fractions of the screen. Default sits directly above the
     -- topic column of the dialogue window, left edges aligned.
     position = { x = 0.6846, y = 0.545 },
@@ -112,6 +118,28 @@ end
 
 local index = nil
 
+local EFFECT_COMMANDS = { 'journal', 'addtopic', 'additem', 'removeitem', 'startscript', 'modpcfacrep', 'payfine' }
+
+-- Looks at an info's result script. Returns nil when it has no lasting effect,
+-- otherwise a table with `quest` (quest id advanced by a Journal command, if any).
+local function parseEffect(script)
+    if not script or script == '' then return nil end
+    local low = script:lower()
+    for _, cmd in ipairs(EFFECT_COMMANDS) do
+        if low:find(cmd, 1, true) then
+            local quest = low:match('journal[%s,]+"?([%w_%-%.]+)')
+            return { quest = quest, command = cmd }
+        end
+    end
+    return nil
+end
+
+local function questName(questId)
+    if not questId then return nil end
+    local ok, rec = pcall(function() return core.dialogue.journal.records[questId] end)
+    return ok and rec and rec.questName or nil
+end
+
 local function buildIndex()
     index = {}
     for _, topic in ipairs(core.dialogue.topic.records) do
@@ -131,6 +159,7 @@ local function buildIndex()
                     index[#index + 1] = {
                         topic = topic.name, topicId = topic.id, info = info,
                         gates = gates, journal = journal, disposition = disp,
+                        effect = parseEffect(info.resultScript),
                     }
                 end
             end
@@ -244,6 +273,7 @@ local function evaluate(actor)
     for _, entry in ipairs(index) do
         local revealed = isRevealed(entry.topicId)
         if (revealed or CONFIG.unrevealedTopics ~= 'hide')
+            and (entry.effect or not CONFIG.requireEffect)
             and actorMatches(actor, entry.info) and questRelevant(entry, quests) then
             local lines, locked = {}, false
             for _, c in ipairs(entry.gates) do
@@ -259,6 +289,13 @@ local function evaluate(actor)
                 lines[#lines + 1] = {
                     text = string.format('Disposition %d', entry.disposition), met = met }
             end
+            if CONFIG.debug then
+                print(string.format('[SpeechGates] %s / info %s | effect=%s | script=%s', entry.topicId,
+                    tostring(entry.info.id), entry.effect and entry.effect.command or 'none',
+                    tostring(entry.info.resultScript):gsub('%s+', ' '):sub(1, 160)))
+            end
+            local qn = entry.effect and questName(entry.effect.quest)
+            if qn then lines[#lines + 1] = { text = 'Advances: ' .. qn, met = true, note = true } end
             if locked or CONFIG.showMetGates then
                 local key = entry.topicId
                 for _, l in ipairs(lines) do key = key .. '|' .. l.text end
@@ -377,6 +414,7 @@ end
 -- whatever texture replacers are installed.
 ---------------------------------------------------------------------------
 
+local warnedTextures = false
 local FADE_TEXTURES = {
     'textures/menu_semitransparent_bg.dds',
     'textures/menu_semitransparent_fade_bg.dds',
@@ -388,11 +426,16 @@ local FADE_TEXTURES = {
 }
 
 local function haveFadeTextures()
+    local missing = {}
     for _, path in ipairs(FADE_TEXTURES) do
         local ok, exists = pcall(vfs.fileExists, path)
-        if not (ok and exists) then return false end
+        if not (ok and exists) then missing[#missing + 1] = path end
     end
-    return true
+    if #missing > 0 and not warnedTextures then
+        warnedTextures = true
+        print('[SpeechGates] fade box textures not found: ' .. table.concat(missing, ', '))
+    end
+    return #missing == 0
 end
 
 local fadeBoxTemplate = nil
@@ -469,7 +512,7 @@ local function refresh()
             rows[#rows + 1] = text(topic, NORMAL)
             for _, lines in ipairs(t) do
                 for _, l in ipairs(lines) do
-                    rows[#rows + 1] = text('   ' .. l.text, l.met and MET or UNMET)
+                    rows[#rows + 1] = text('   ' .. l.text, l.note and HINT or (l.met and MET or UNMET))
                 end
             end
         elseif CONFIG.blurStyle == 'smear' then
