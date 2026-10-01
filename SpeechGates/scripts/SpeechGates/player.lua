@@ -34,15 +34,21 @@ local CONFIG = {
     -- How 'obscure' looks: 'smear' = soft blurred scrambled text (default),
     -- 'bars' = translucent bars, 'text' = a grey "???".
     blurStyle = 'smear',
-    -- Panel box: 'auto' uses the Interface Reimagined fade box when its textures
-    -- are installed, 'ir' forces it, 'vanilla' uses the stock OpenMW box.
-    boxStyle = 'ir',
-    -- Placement as fractions of the screen. Default sits directly above the
-    -- topic column of the dialogue window, left edges aligned.
-    position = { x = 0.6846, y = 0.545 },
-    anchor = { x = 0, y = 1 },
-    -- Minimum panel width as a fraction of the screen (matches the topic column).
-    minWidth = 0.118,
+    -- Placement, as fractions of the screen. The defaults put the panel in the
+    -- empty part of the dialogue window's topic column, under "Goodbye", aligned
+    -- to the column. Tune these if your dialogue window sits elsewhere.
+    columnX = 0.6846,       -- left edge of the topic column
+    columnWidth = 0.1184,   -- width of the topic column
+    panelTop = 0.893,       -- where the panel starts (just under the Goodbye button)
+    columnBottom = 0.9766,  -- where the column's own background ends; the panel
+                            -- draws its own background only below this line
+    -- Your [GUI] "scaling factor" from settings.cfg. ui.screenSize() reports real
+    -- pixels, but UI positions are in units of pixels / scaling factor.
+    guiScale = 1.25,
+    -- Look (UI units).
+    edgeWidth = 3,          -- thickness of the left line
+    textInset = 19,         -- gap between the left line and the text
+    padY = 6,               -- space above and below the text
 }
 
 local CT = core.dialogue.CONDITION_TYPE
@@ -388,19 +394,19 @@ for dx = -2, 2, 2 do
     end
 end
 
-local function smear(str, color, indent)
+local function smear(str, color)
     local copies = {}
     for _, o in ipairs(SMEAR_OFFSETS) do
         copies[#copies + 1] = {
             type = ui.TYPE.Text,
             props = {
                 text = scramble(str), textSize = CONFIG.textSize, textColor = color,
-                alpha = 0.16, position = o + v2(indent, 0),
+                alpha = 0.16, position = o,
             },
         }
     end
     return {
-        props = { size = v2(#str * CONFIG.textSize * 0.55 + indent + 4, CONFIG.textSize + 4) },
+        props = { size = v2(#str * CONFIG.textSize * 0.55 + 4, CONFIG.textSize) },
         content = ui.content(copies),
     }
 end
@@ -409,7 +415,7 @@ local barTexture = ui.texture { path = 'white' }
 
 -- A soft translucent bar standing in for blurred text of roughly `chars` letters.
 local function smudge(chars, indent)
-    local height = CONFIG.textSize + 2
+    local height = CONFIG.textSize
     local width = (CONFIG.smudgeFixedWidth and 14 or math.max(4, math.min(chars, 28))) * CONFIG.textSize * 0.5
     return {
         props = { size = v2(width + indent, height) },
@@ -427,83 +433,74 @@ local function smudge(chars, indent)
 end
 
 ---------------------------------------------------------------------------
--- Box: a Lua rebuild of Interface Reimagined's "MW_Box_Fade" skin (the box used
--- by the dialogue window): translucent background, a thin solid left edge and
--- faded top / bottom / right edges. Uses the same texture files, so it follows
--- whatever texture replacers are installed.
+-- Panel background: Interface Reimagined's "MW_Box_Fade" look, built from the
+-- same texture files. The panel sits inside the dialogue window's topic column,
+-- which already has this background, so a background is only drawn for the part
+-- of the panel that hangs below the column's end - blending into it.
 ---------------------------------------------------------------------------
 
-local warnedTextures = false
-local FADE_TEXTURES = {
-    'textures/menu_semitransparent_bg.dds',
-    'textures/menu_semitransparent_fade_bg.dds',
-    'textures/menu_semitransparent_fade_top_bg.dds',
-    'textures/menu_semitransparent_fade_bottom_bg.dds',
-    'textures/menu_semitransparent_fade_top_right_bg.dds',
-    'textures/menu_semitransparent_fade_bottom_right_bg.dds',
-    'textures/menu_thin_border_left.dds',
+local FADE = 20 -- thickness of the faded edges
+
+local TEX = {
+    bg = 'textures/menu_semitransparent_bg.dds',
+    right = 'textures/menu_semitransparent_fade_bg.dds',
+    bottom = 'textures/menu_semitransparent_fade_bottom_bg.dds',
+    corner = 'textures/menu_semitransparent_fade_bottom_right_bg.dds',
+    left = 'textures/menu_thin_border_left.dds',
 }
 
-local function haveFadeTextures()
+local warnedTextures = false
+local function haveTextures()
     local missing = {}
-    for _, path in ipairs(FADE_TEXTURES) do
+    for _, path in pairs(TEX) do
         local ok, exists = pcall(vfs.fileExists, path)
         if not (ok and exists) then missing[#missing + 1] = path end
     end
     if #missing > 0 and not warnedTextures then
         warnedTextures = true
-        print('[SpeechGates] fade box textures not found: ' .. table.concat(missing, ', '))
+        print('[SpeechGates] fade textures not found, using plain background: ' .. table.concat(missing, ', '))
     end
     return #missing == 0
 end
 
-local fadeBoxTemplate = nil
-
-local function getFadeBox()
-    if fadeBoxTemplate then return fadeBoxTemplate end
-    local PAD, FADE, EDGE = 10, 20, 2
-    local function img(path, props, tileH, tileV)
-        props.resource = ui.texture { path = path }
-        props.tileH = tileH or false
-        props.tileV = tileV or false
-        return { template = { type = ui.TYPE.Image, props = {} }, props = props }
-    end
-    local inner = PAD * 2 - FADE * 2
-    fadeBoxTemplate = {
-        type = ui.TYPE.Container,
-        content = ui.content {
-            -- background (between the fades)
-            img('textures/menu_semitransparent_bg.dds',
-                { position = v2(EDGE, FADE), size = v2(PAD * 2 - EDGE - FADE, inner), relativeSize = v2(1, 1) },
-                true, true),
-            -- solid thin left edge
-            img('textures/menu_thin_border_left.dds',
-                { size = v2(EDGE, PAD * 2), relativeSize = v2(0, 1) }, false, true),
-            -- fades
-            img('textures/menu_semitransparent_fade_top_bg.dds',
-                { position = v2(EDGE, 0), size = v2(PAD * 2 - EDGE - FADE, FADE), relativeSize = v2(1, 0) }, true, false),
-            img('textures/menu_semitransparent_fade_bottom_bg.dds',
-                { relativePosition = v2(0, 1), position = v2(EDGE, PAD * 2 - FADE),
-                  size = v2(PAD * 2 - EDGE - FADE, FADE), relativeSize = v2(1, 0) }, true, false),
-            img('textures/menu_semitransparent_fade_bg.dds',
-                { relativePosition = v2(1, 0), position = v2(PAD * 2 - FADE, FADE),
-                  size = v2(FADE, inner), relativeSize = v2(0, 1) }, false, true),
-            img('textures/menu_semitransparent_fade_top_right_bg.dds',
-                { relativePosition = v2(1, 0), position = v2(PAD * 2 - FADE, 0), size = v2(FADE, FADE) }),
-            img('textures/menu_semitransparent_fade_bottom_right_bg.dds',
-                { relativePosition = v2(1, 1), position = v2(PAD * 2 - FADE, PAD * 2 - FADE), size = v2(FADE, FADE) }),
-            { external = { slot = true }, props = { position = v2(PAD, PAD), relativeSize = v2(1, 1) } },
-        },
-    }
-    return fadeBoxTemplate
+local function image(path, props, tileH, tileV)
+    props.resource = ui.texture { path = path }
+    props.tileH = tileH or false
+    props.tileV = tileV or false
+    return { type = ui.TYPE.Image, props = props }
 end
 
-local function boxTemplate()
-    local style = CONFIG.boxStyle
-    if style == 'ir' or (style == 'auto' and haveFadeTextures()) then
-        return getFadeBox()
+-- Background pieces for a panel of size (W, H) whose first `shared` pixels
+-- (from the top) lie over the column's own background.
+local function backgroundPieces(W, H, shared)
+    local pieces = {}
+    local edge = CONFIG.edgeWidth
+    local hang = H - shared -- height hanging below the column
+    if haveTextures() then
+        if hang > 0 then
+            local bgH = math.max(0, hang - FADE)
+            if bgH > 0 then
+                pieces[#pieces + 1] = image(TEX.bg,
+                    { position = v2(edge, shared), size = v2(W - edge - FADE, bgH) }, true, true)
+                pieces[#pieces + 1] = image(TEX.right,
+                    { position = v2(W - FADE, shared), size = v2(FADE, bgH) }, false, true)
+            end
+            pieces[#pieces + 1] = image(TEX.bottom,
+                { position = v2(edge, H - FADE), size = v2(W - edge - FADE, FADE) }, true, false)
+            pieces[#pieces + 1] = image(TEX.corner,
+                { position = v2(W - FADE, H - FADE), size = v2(FADE, FADE) })
+        end
+        pieces[#pieces + 1] = image(TEX.left, { size = v2(edge, H) }, false, true)
+    elseif hang > 0 then
+        pieces[#pieces + 1] = {
+            type = ui.TYPE.Image,
+            props = {
+                resource = barTexture, color = util.color.rgb(0, 0, 0), alpha = 0.67,
+                position = v2(0, shared), size = v2(W, hang),
+            },
+        }
     end
-    return I.MWUI.templates.boxTransparentThick
+    return pieces
 end
 
 local function destroyPanel()
@@ -519,12 +516,8 @@ local function refresh()
     local order, byTopic, disposition, extra = evaluate(currentActor)
     if #order == 0 then return end
 
-    local minWidth = math.floor(ui.screenSize().x * CONFIG.minWidth)
-    local rows = {
-        { props = { size = v2(minWidth, 0) } }, -- keeps the panel as wide as the topic column
-        text('Requirements', HEADER),
-        text('Disposition: ' .. disposition, HEADER),
-    }
+    -- Rows, top to bottom. Each is a layout that gets an absolute position.
+    local rows = { text('Requirements', HEADER), text('Disposition: ' .. disposition, HEADER) }
     for _, topic in ipairs(order) do
         local t = byTopic[topic]
         if t.revealed or CONFIG.unrevealedTopics == 'show' then
@@ -535,9 +528,9 @@ local function refresh()
                 end
             end
         elseif CONFIG.blurStyle == 'smear' then
-            rows[#rows + 1] = smear(topic, NORMAL, 0)
+            rows[#rows + 1] = smear(topic, NORMAL)
             for _, l in ipairs(t[1]) do
-                rows[#rows + 1] = smear('   ' .. l.text, NORMAL, 0)
+                rows[#rows + 1] = smear('   ' .. l.text, NORMAL)
             end
         elseif CONFIG.blurStyle == 'bars' then
             rows[#rows + 1] = smudge(#topic, 0)
@@ -548,19 +541,31 @@ local function refresh()
             rows[#rows + 1] = text('???', HINT)
         end
     end
-
     if extra > 0 then rows[#rows + 1] = text(string.format('+ %d more', extra), HINT) end
+
+    local real = ui.screenSize()
+    local screen = v2(real.x / CONFIG.guiScale, real.y / CONFIG.guiScale)
+    local W = math.floor(screen.x * CONFIG.columnWidth)
+    local rowH = CONFIG.textSize
+    local H = CONFIG.padY * 2 + #rows * rowH
+    local top = math.floor(screen.y * CONFIG.panelTop)
+    top = math.max(0, math.min(top, screen.y - H)) -- keep it on screen
+    local shared = math.max(0, math.min(H, math.floor(screen.y * CONFIG.columnBottom) - top))
+
+    local content = ui.content(backgroundPieces(W, H, shared))
+    for i, row in ipairs(rows) do
+        row.props = row.props or {}
+        row.props.position = v2(CONFIG.textInset, CONFIG.padY + (i - 1) * rowH)
+        content:add(row)
+    end
 
     panel = ui.create {
         layer = 'Windows',
-        template = boxTemplate(),
         props = {
-            relativePosition = v2(CONFIG.position.x, CONFIG.position.y),
-            anchor = v2(CONFIG.anchor.x, CONFIG.anchor.y),
+            position = v2(math.floor(screen.x * CONFIG.columnX), top),
+            size = v2(W, H),
         },
-        content = ui.content {
-            { type = ui.TYPE.Flex, props = { horizontal = false }, content = ui.content(rows) },
-        },
+        content = content,
     }
 end
 

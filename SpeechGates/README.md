@@ -22,8 +22,8 @@ Edit the `CONFIG` table at the top of `scripts/SpeechGates/player.lua`:
 - `showMetGates` - also list requirements you already meet.
 - `unrevealedTopics` - undiscovered topics: `'obscure'` (default), `'hide'`, or `'show'`.
 - `blurStyle` - how obscured topics look: `'smear'` (soft blurred scrambled text, default), `'bars'`, or `'text'` (`???`).
-- `boxStyle` - `'ir'` (default) rebuilds Interface Reimagined's fade box (the box its dialogue window uses) from its textures; `'auto'` does so only when the textures are found, otherwise the stock box; `'vanilla'` always uses the stock box.
-- `position` / `anchor` / `minWidth` - placement (fractions of the screen). The default sits directly above the dialogue window's topic column.
+- Placement: `columnX`, `columnWidth`, `panelTop`, `columnBottom` (fractions of the screen) and `guiScale` (your `[GUI] scaling factor` from `settings.cfg`). Defaults put the panel in the empty part of the dialogue window's topic column, under "Goodbye", lined up with the column. Its own background (Interface Reimagined's fade box textures) is only drawn for any part that hangs below the column's end, so it blends in.
+- Look: `edgeWidth` (left line thickness), `textInset`, `padY`.
 
 ## Known topics
 OpenMW does not tell Lua which topics you know. A topic counts as discovered if it is in your journal topic list, or its name appeared in text you have seen: journal entries, reached quest stages, and NPC speech heard while the mod is active (remembered in your save). A topic you learned some other way can still be shown blurred; set `unrevealedTopics = 'show'` if that bothers you.
