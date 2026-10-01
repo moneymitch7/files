@@ -50,7 +50,7 @@ local CONFIG = {
     -- pixels, but UI positions are in units of pixels / scaling factor.
     guiScale = 1.25,
     -- Look (UI units).
-    edgeWidth = 2,          -- thickness of the left line (Interface Reimagined uses 2)
+    edgeWidth = 1,          -- thickness of the left line (try 2 if 1 is too thin)
     textInset = 19,         -- gap between the left line and the text
     padY = 6,               -- space above and below the text
 }
