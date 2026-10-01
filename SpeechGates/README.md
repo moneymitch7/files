@@ -23,7 +23,7 @@ Edit the `CONFIG` table at the top of `scripts/SpeechGates/player.lua`:
 - `showMetGates` - also list requirements you already meet.
 - `unrevealedTopics` - undiscovered topics: `'obscure'` (default), `'hide'`, or `'show'`.
 - `blurStyle` - how obscured topics look: `'smear'` (soft blurred scrambled text, default), `'bars'`, or `'text'` (`???`).
-- Placement: `columnX`, `columnWidth`, `panelTop`, `columnBottom` (fractions of the screen) and `guiScale` (your `[GUI] scaling factor` from `settings.cfg`). Defaults put the panel in the empty part of the dialogue window's topic column, under "Goodbye", lined up with the column. Its own background (Interface Reimagined's fade box textures) is only drawn for any part that hangs below the column's end, so it blends in.
+- Placement: `columnX`, `columnWidth`, `panelTop`, `columnBottom` (fractions of the screen) and `guiScale` (your `[GUI] scaling factor` from `settings.cfg`). Defaults put the panel in the empty part of the dialogue window's topic column, under "Goodbye", lined up with the column. Its own background (Interface Reimagined's fade box textures) covers the whole panel with a soft top edge that blends into the column above (`fullBackground = false` draws it only below `columnBottom`).
 - Look: `edgeWidth` (left line thickness), `textInset`, `padY`.
 
 ## Known topics

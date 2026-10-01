@@ -26,6 +26,7 @@ local CONFIG = {
     requireEffect = true,
     -- Print each listed response (id, result script) to openmw.log.
     debug = false,
+    maxPersonality = 100, -- above this, show "Persuade" instead of a Personality figure
     maxTopics = 8, -- most topics listed at once
     showMetGates = true, -- also list requirements you already meet (in green)
     -- Topics you have not discovered yet (see README, "Known topics"):
@@ -42,11 +43,14 @@ local CONFIG = {
     panelTop = 0.893,       -- where the panel starts (just under the Goodbye button)
     columnBottom = 0.9766,  -- where the column's own background ends; the panel
                             -- draws its own background only below this line
+    -- true: the panel draws its own dark background over its whole height (soft
+    -- top edge). false: only the part hanging below `columnBottom` gets one.
+    fullBackground = true,
     -- Your [GUI] "scaling factor" from settings.cfg. ui.screenSize() reports real
     -- pixels, but UI positions are in units of pixels / scaling factor.
     guiScale = 1.25,
     -- Look (UI units).
-    edgeWidth = 3,          -- thickness of the left line
+    edgeWidth = 2,          -- thickness of the left line (Interface Reimagined uses 2)
     textInset = 19,         -- gap between the left line and the text
     padY = 6,               -- space above and below the text
 }
@@ -320,7 +324,13 @@ local function evaluate(actor)
                     -- needed to close the gap is exact, other things being equal.
                     local personality = types.Actor.stats.attributes.personality(self).modified
                     local needed = personality + math.ceil((entry.disposition - disposition) / dispPerPersonality())
-                    lines[#lines + 1] = { text = string.format('Personality %d / %d', personality, needed), met = false }
+                    if needed <= CONFIG.maxPersonality then
+                        lines[#lines + 1] = { text = string.format('Personality %d / %d', personality, needed), met = false }
+                    else
+                        -- Not reachable by Personality alone: it has to be persuaded up.
+                        lines[#lines + 1] = {
+                            text = string.format('Persuade: +%d needed', entry.disposition - disposition), met = false }
+                    end
                 end
             end
             if CONFIG.debug then
@@ -457,6 +467,8 @@ local FADE = 20 -- thickness of the faded edges
 local TEX = {
     bg = 'textures/menu_semitransparent_bg.dds',
     right = 'textures/menu_semitransparent_fade_bg.dds',
+    top = 'textures/menu_semitransparent_fade_top_bg.dds',
+    topCorner = 'textures/menu_semitransparent_fade_top_right_bg.dds',
     bottom = 'textures/menu_semitransparent_fade_bottom_bg.dds',
     corner = 'textures/menu_semitransparent_fade_bottom_right_bg.dds',
     left = 'textures/menu_thin_border_left.dds',
@@ -484,19 +496,29 @@ local function image(path, props, tileH, tileV)
 end
 
 -- Background pieces for a panel of size (W, H) whose first `shared` pixels
--- (from the top) lie over the column's own background.
+-- (from the top) already lie over the column's own background. With shared = 0
+-- the whole panel gets a background whose top edge fades in from nothing, so it
+-- joins the column above without a visible seam.
 local function backgroundPieces(W, H, shared)
     local pieces = {}
     local edge = CONFIG.edgeWidth
-    local hang = H - shared -- height hanging below the column
+    local hang = H - shared
     if haveTextures() then
         if hang > 0 then
-            local bgH = math.max(0, hang - FADE)
+            local fadeTop = (shared == 0) and FADE or 0
+            local bgY = shared + fadeTop
+            local bgH = H - FADE - bgY
             if bgH > 0 then
                 pieces[#pieces + 1] = image(TEX.bg,
-                    { position = v2(edge, shared), size = v2(W - edge - FADE, bgH) }, true, true)
+                    { position = v2(edge, bgY), size = v2(W - edge - FADE, bgH) }, true, true)
                 pieces[#pieces + 1] = image(TEX.right,
-                    { position = v2(W - FADE, shared), size = v2(FADE, bgH) }, false, true)
+                    { position = v2(W - FADE, bgY), size = v2(FADE, bgH) }, false, true)
+            end
+            if fadeTop > 0 then
+                pieces[#pieces + 1] = image(TEX.top,
+                    { position = v2(edge, 0), size = v2(W - edge - FADE, FADE) }, true, false)
+                pieces[#pieces + 1] = image(TEX.topCorner,
+                    { position = v2(W - FADE, 0), size = v2(FADE, FADE) })
             end
             pieces[#pieces + 1] = image(TEX.bottom,
                 { position = v2(edge, H - FADE), size = v2(W - edge - FADE, FADE) }, true, false)
@@ -563,7 +585,10 @@ local function refresh()
     local H = CONFIG.padY * 2 + #rows * rowH
     local top = math.floor(screen.y * CONFIG.panelTop)
     top = math.max(0, math.min(top, screen.y - H)) -- keep it on screen
-    local shared = math.max(0, math.min(H, math.floor(screen.y * CONFIG.columnBottom) - top))
+    local shared = 0
+    if not CONFIG.fullBackground then
+        shared = math.max(0, math.min(H, math.floor(screen.y * CONFIG.columnBottom) - top))
+    end
 
     local content = ui.content(backgroundPieces(W, H, shared))
     for i, row in ipairs(rows) do
