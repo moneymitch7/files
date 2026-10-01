@@ -5,8 +5,8 @@ While the dialogue window is open, a small panel lists responses that are tied t
 ```
 Requirements
 Rumors
-   Speechcraft 45 (you: 38)     <- red: not met
-   Disposition 60 (now: 70)     <- green: met
+   Speechcraft 38 / 45        <- red: not met
+   Disposition 60               <- green: met
 ```
 
 Event-driven only: nothing runs per frame. Work happens when the dialogue window opens and after each dialogue response. The requirement index is built once, on your first dialogue after launch.
@@ -17,7 +17,8 @@ Copy the `SpeechGates` folder as a mod (MO2 mod, or add its folder as a `data=` 
 ## Settings
 Edit the `CONFIG` table at the top of `scripts/SpeechGates/player.lua`:
 - `showMetGates` - also list requirements you already meet.
-- `knownTopicsOnly` - only topics in your journal topic list (avoids spoilers, but can hide topics you know that have no entry yet).
+- `unrevealedTopics` - topics not yet in your journal topic list: `'obscure'` (grey `???`, default), `'hide'`, or `'show'`.
+- `position` / `anchor` - screen placement (fractions of the screen).
 
 ## Limits
 - The vanilla topic list is native UI; the panel sits beside it rather than labelling topics inline.

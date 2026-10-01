@@ -20,7 +20,13 @@ local I = require('openmw.interfaces')
 local CONFIG = {
     textSize = 16,
     showMetGates = true, -- also list requirements you already meet (in green)
-    knownTopicsOnly = false, -- true: only topics present in your journal topic list
+    -- Topics you have not talked about yet (not in your journal topic list):
+    --   'obscure' = show a grey "???" hint, 'hide' = omit, 'show' = show normally.
+    unrevealedTopics = 'obscure',
+    -- Panel placement as a fraction of the screen. The panel grows upward from
+    -- this point (anchor bottom-centre), by default above the topic column.
+    position = { x = 0.745, y = 0.52 },
+    anchor = { x = 0.5, y = 1 },
 }
 
 local CT = core.dialogue.CONDITION_TYPE
@@ -164,12 +170,13 @@ end
 local function evaluate(actor)
     if not index then buildIndex() end
     local quests = types.Player.quests(self)
-    local topics = CONFIG.knownTopicsOnly and types.Player.journal(self).topics or nil
+    local journalTopics = types.Player.journal(self).topics
     local disposition = types.NPC.getDisposition(actor, self)
 
     local byTopic, order, seen = {}, {}, {}
     for _, entry in ipairs(index) do
-        if (not topics or topics[entry.topicId])
+        local revealed = journalTopics[entry.topicId] ~= nil
+        if (revealed or CONFIG.unrevealedTopics ~= 'hide')
             and actorMatches(actor, entry.info) and questRelevant(entry, quests) then
             local lines, locked = {}, false
             for _, c in ipairs(entry.gates) do
@@ -177,13 +184,13 @@ local function evaluate(actor)
                 local need, have = minimumValue(c), g.get()
                 local met = have >= need
                 locked = locked or not met
-                lines[#lines + 1] = { text = string.format('%s %d (you: %d)', g.label, need, have), met = met }
+                lines[#lines + 1] = { text = string.format('%s %d / %d', g.label, have, need), met = met }
             end
             if entry.disposition > 0 then
                 local met = disposition >= entry.disposition
                 locked = locked or not met
                 lines[#lines + 1] = {
-                    text = string.format('Disposition %d (now: %d)', entry.disposition, disposition), met = met }
+                    text = string.format('Disposition %d', entry.disposition), met = met }
             end
             if locked or CONFIG.showMetGates then
                 local key = entry.topicId
@@ -192,7 +199,7 @@ local function evaluate(actor)
                     seen[key] = true
                     local t = byTopic[entry.topic]
                     if not t then
-                        t = {}
+                        t = { revealed = revealed }
                         byTopic[entry.topic] = t
                         order[#order + 1] = entry.topic
                     end
@@ -202,7 +209,7 @@ local function evaluate(actor)
         end
     end
     table.sort(order)
-    return order, byTopic
+    return order, byTopic, disposition
 end
 
 ---------------------------------------------------------------------------
@@ -212,6 +219,7 @@ end
 local HEADER = util.color.rgb(0.87, 0.79, 0.62)
 local UNMET = util.color.rgb(0.92, 0.42, 0.34)
 local MET = util.color.rgb(0.52, 0.82, 0.52)
+local HINT = util.color.rgb(0.55, 0.52, 0.47)
 
 local panel = nil
 local currentActor = nil
@@ -230,23 +238,34 @@ end
 local function refresh()
     destroyPanel()
     if not currentActor or not currentActor:isValid() or currentActor.type ~= types.NPC then return end
-    local order, byTopic = evaluate(currentActor)
+    local order, byTopic, disposition = evaluate(currentActor)
     if #order == 0 then return end
 
-    local rows = { text('Requirements', HEADER) }
+    local rows = {
+        text('Requirements', HEADER),
+        text('Disposition: ' .. disposition, HEADER),
+    }
     for _, topic in ipairs(order) do
-        rows[#rows + 1] = text(topic, HEADER)
-        for _, lines in ipairs(byTopic[topic]) do
-            for _, l in ipairs(lines) do
-                rows[#rows + 1] = text('   ' .. l.text, l.met and MET or UNMET)
+        local t = byTopic[topic]
+        if t.revealed or CONFIG.unrevealedTopics == 'show' then
+            rows[#rows + 1] = text(topic, HEADER)
+            for _, lines in ipairs(t) do
+                for _, l in ipairs(lines) do
+                    rows[#rows + 1] = text('   ' .. l.text, l.met and MET or UNMET)
+                end
             end
+        else
+            rows[#rows + 1] = text('???', HINT)
         end
     end
 
     panel = ui.create {
         layer = 'Windows',
         template = I.MWUI.templates.boxTransparentThick,
-        props = { relativePosition = util.vector2(0.985, 0.5), anchor = util.vector2(1, 0.5) },
+        props = {
+            relativePosition = util.vector2(CONFIG.position.x, CONFIG.position.y),
+            anchor = util.vector2(CONFIG.anchor.x, CONFIG.anchor.y),
+        },
         content = ui.content {
             { type = ui.TYPE.Flex, props = { horizontal = false }, content = ui.content(rows) },
         },
