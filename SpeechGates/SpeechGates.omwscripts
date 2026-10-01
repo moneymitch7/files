@@ -1,0 +1,2 @@
+# Speech Gates: shows the skill/attribute/disposition requirements of quest-related dialogue.
+PLAYER: scripts/SpeechGates/player.lua
