@@ -16,21 +16,26 @@ local types = require('openmw.types')
 local ui = require('openmw.ui')
 local util = require('openmw.util')
 local I = require('openmw.interfaces')
+local vfs = require('openmw.vfs')
 
 local CONFIG = {
     textSize = 16,
     showMetGates = true, -- also list requirements you already meet (in green)
-    -- Topics you have not talked about yet (not in your journal topic list):
-    --   'obscure' = show a smudged hint, 'hide' = omit, 'show' = show normally.
+    -- Topics you have not discovered yet (see README, "Known topics"):
+    --   'obscure' = show a blurred hint, 'hide' = omit, 'show' = show normally.
     unrevealedTopics = 'obscure',
-    -- How 'obscure' looks: 'bars' = soft smudge bars (name length hinted),
-    -- 'text' = a grey "???".
-    blurStyle = 'bars',
-    smudgeFixedWidth = false, -- true: every bar the same width (hides name length)
-    -- Panel placement as a fraction of the screen. The panel grows upward from
-    -- this point (anchor bottom-centre), by default above the topic column.
-    position = { x = 0.745, y = 0.52 },
-    anchor = { x = 0.5, y = 1 },
+    -- How 'obscure' looks: 'smear' = soft blurred scrambled text (default),
+    -- 'bars' = translucent bars, 'text' = a grey "???".
+    blurStyle = 'smear',
+    -- Panel box: 'auto' uses the Interface Reimagined fade box when its textures
+    -- are installed, 'ir' forces it, 'vanilla' uses the stock OpenMW box.
+    boxStyle = 'auto',
+    -- Placement as fractions of the screen. Default sits directly above the
+    -- topic column of the dialogue window, left edges aligned.
+    position = { x = 0.6846, y = 0.545 },
+    anchor = { x = 0, y = 1 },
+    -- Minimum panel width as a fraction of the screen (matches the topic column).
+    minWidth = 0.118,
 }
 
 local CT = core.dialogue.CONDITION_TYPE
@@ -134,6 +139,64 @@ local function buildIndex()
 end
 
 ---------------------------------------------------------------------------
+-- Known topics (best effort)
+--
+-- OpenMW does not expose which topics the player knows. A topic is treated as
+-- discovered when it is in the journal topic list, or when its name appeared in
+-- text the player has seen: journal entries, reached quest stages, and NPC
+-- responses heard while this mod is active (remembered in the save file).
+---------------------------------------------------------------------------
+
+local learned = {} -- topic id -> true
+local seeded = false
+
+local function containsWord(text, word)
+    local init = 1
+    while true do
+        local a, b = text:find(word, init, true)
+        if not a then return false end
+        local before = a > 1 and text:sub(a - 1, a - 1) or ' '
+        local after = b < #text and text:sub(b + 1, b + 1) or ' '
+        if not before:match('[%w]') and not after:match('[%w]') then return true end
+        init = a + 1
+    end
+end
+
+local function scanText(text)
+    if not text or not index then return end
+    text = text:lower()
+    for _, entry in ipairs(index) do
+        if not learned[entry.topicId] and containsWord(text, entry.topicId) then
+            learned[entry.topicId] = true
+        end
+    end
+end
+
+local function seedLearned()
+    seeded = true
+    if not index then buildIndex() end
+    local ok, err = pcall(function()
+        for _, topic in pairs(types.Player.journal(self).topics) do
+            learned[topic.id] = true
+            for _, e in ipairs(topic.entries) do scanText(e.text) end
+        end
+        for questId, q in pairs(types.Player.quests(self)) do
+            local rec = core.dialogue.journal.records[questId]
+            if rec and q.stage then
+                for _, info in ipairs(rec.infos) do
+                    if info.questStage and info.questStage <= q.stage then scanText(info.text) end
+                end
+            end
+        end
+    end)
+    if not ok then print('[SpeechGates] seeding known topics failed: ' .. tostring(err)) end
+end
+
+local function isRevealed(topicId)
+    return learned[topicId] or types.Player.journal(self).topics[topicId] ~= nil
+end
+
+---------------------------------------------------------------------------
 -- Evaluation against the current actor / player state
 ---------------------------------------------------------------------------
 
@@ -174,12 +237,12 @@ end
 local function evaluate(actor)
     if not index then buildIndex() end
     local quests = types.Player.quests(self)
-    local journalTopics = types.Player.journal(self).topics
+    if not seeded then seedLearned() end
     local disposition = types.NPC.getDisposition(actor, self)
 
     local byTopic, order, seen = {}, {}, {}
     for _, entry in ipairs(index) do
-        local revealed = journalTopics[entry.topicId] ~= nil
+        local revealed = isRevealed(entry.topicId)
         if (revealed or CONFIG.unrevealedTopics ~= 'hide')
             and actorMatches(actor, entry.info) and questRelevant(entry, quests) then
             local lines, locked = {}, false
@@ -233,9 +296,57 @@ local HINT = util.color.rgb(0.55, 0.52, 0.47)
 
 local panel = nil
 local currentActor = nil
+local v2 = util.vector2
 
 local function text(str, color)
     return { type = ui.TYPE.Text, props = { text = str, textSize = CONFIG.textSize, textColor = color } }
+end
+
+-- Deterministic letter substitution so hidden entries are unreadable but stable
+-- between refreshes. Spaces and punctuation are kept so the length still hints.
+local function scramble(str)
+    local out = {}
+    for i = 1, #str do
+        local c = str:sub(i, i)
+        local b = c:byte()
+        local h = (b * 7 + i * 13 + #str * 5) % 26
+        if c:match('%l') then
+            out[i] = string.char(97 + h)
+        elseif c:match('%u') then
+            out[i] = string.char(65 + h)
+        elseif c:match('%d') then
+            out[i] = tostring(h % 10)
+        else
+            out[i] = c
+        end
+    end
+    return table.concat(out)
+end
+
+-- Fake blur: the scrambled text drawn several times with 1-2px offsets at low
+-- opacity. (OpenMW cannot apply a shader to a UI widget.)
+local SMEAR_OFFSETS = {}
+for dx = -2, 2, 2 do
+    for dy = -1, 1 do
+        SMEAR_OFFSETS[#SMEAR_OFFSETS + 1] = v2(dx, dy)
+    end
+end
+
+local function smear(str, color, indent)
+    local copies = {}
+    for _, o in ipairs(SMEAR_OFFSETS) do
+        copies[#copies + 1] = {
+            type = ui.TYPE.Text,
+            props = {
+                text = scramble(str), textSize = CONFIG.textSize, textColor = color,
+                alpha = 0.16, position = o + v2(indent, 0),
+            },
+        }
+    end
+    return {
+        props = { size = v2(#str * CONFIG.textSize * 0.55 + indent + 4, CONFIG.textSize + 4) },
+        content = ui.content(copies),
+    }
 end
 
 local barTexture = ui.texture { path = 'white' }
@@ -245,22 +356,92 @@ local function smudge(chars, indent)
     local height = CONFIG.textSize + 2
     local width = (CONFIG.smudgeFixedWidth and 14 or math.max(4, math.min(chars, 28))) * CONFIG.textSize * 0.5
     return {
-        props = { size = util.vector2(width + indent, height) },
+        props = { size = v2(width + indent, height) },
         content = ui.content {
             {
                 type = ui.TYPE.Image,
                 props = {
-                    resource = barTexture,
-                    color = HINT,
-                    alpha = 0.3,
-                    position = util.vector2(indent, 0),
-                    size = util.vector2(width, height * 0.6),
-                    anchor = util.vector2(0, 0),
-                    relativePosition = util.vector2(0, 0.2),
+                    resource = barTexture, color = HINT, alpha = 0.3,
+                    position = v2(indent, 0), size = v2(width, height * 0.6),
+                    relativePosition = v2(0, 0.2),
                 },
             },
         },
     }
+end
+
+---------------------------------------------------------------------------
+-- Box: a Lua rebuild of Interface Reimagined's "MW_Box_Fade" skin (the box used
+-- by the dialogue window): translucent background, a thin solid left edge and
+-- faded top / bottom / right edges. Uses the same texture files, so it follows
+-- whatever texture replacers are installed.
+---------------------------------------------------------------------------
+
+local FADE_TEXTURES = {
+    'textures/menu_semitransparent_bg.dds',
+    'textures/menu_semitransparent_fade_bg.dds',
+    'textures/menu_semitransparent_fade_top_bg.dds',
+    'textures/menu_semitransparent_fade_bottom_bg.dds',
+    'textures/menu_semitransparent_fade_top_right_bg.dds',
+    'textures/menu_semitransparent_fade_bottom_right_bg.dds',
+    'textures/menu_thin_border_left.dds',
+}
+
+local function haveFadeTextures()
+    for _, path in ipairs(FADE_TEXTURES) do
+        local ok, exists = pcall(vfs.fileExists, path)
+        if not (ok and exists) then return false end
+    end
+    return true
+end
+
+local fadeBoxTemplate = nil
+
+local function getFadeBox()
+    if fadeBoxTemplate then return fadeBoxTemplate end
+    local PAD, FADE, EDGE = 10, 20, 2
+    local function img(path, props, tileH, tileV)
+        props.resource = ui.texture { path = path }
+        props.tileH = tileH or false
+        props.tileV = tileV or false
+        return { template = { type = ui.TYPE.Image, props = {} }, props = props }
+    end
+    local inner = PAD * 2 - FADE * 2
+    fadeBoxTemplate = {
+        type = ui.TYPE.Container,
+        content = ui.content {
+            -- background (between the fades)
+            img('textures/menu_semitransparent_bg.dds',
+                { position = v2(EDGE, FADE), size = v2(PAD * 2 - EDGE - FADE, inner), relativeSize = v2(1, 1) },
+                true, true),
+            -- solid thin left edge
+            img('textures/menu_thin_border_left.dds',
+                { size = v2(EDGE, PAD * 2), relativeSize = v2(0, 1) }, false, true),
+            -- fades
+            img('textures/menu_semitransparent_fade_top_bg.dds',
+                { position = v2(EDGE, 0), size = v2(PAD * 2 - EDGE - FADE, FADE), relativeSize = v2(1, 0) }, true, false),
+            img('textures/menu_semitransparent_fade_bottom_bg.dds',
+                { relativePosition = v2(0, 1), position = v2(EDGE, PAD * 2 - FADE),
+                  size = v2(PAD * 2 - EDGE - FADE, FADE), relativeSize = v2(1, 0) }, true, false),
+            img('textures/menu_semitransparent_fade_bg.dds',
+                { relativePosition = v2(1, 0), position = v2(PAD * 2 - FADE, FADE),
+                  size = v2(FADE, inner), relativeSize = v2(0, 1) }, false, true),
+            img('textures/menu_semitransparent_fade_top_right_bg.dds',
+                { relativePosition = v2(1, 0), position = v2(PAD * 2 - FADE, 0), size = v2(FADE, FADE) }),
+            img('textures/menu_semitransparent_fade_bottom_right_bg.dds',
+                { relativePosition = v2(1, 1), position = v2(PAD * 2 - FADE, PAD * 2 - FADE), size = v2(FADE, FADE) }),
+            { external = { slot = true }, props = { position = v2(PAD, PAD), relativeSize = v2(1, 1) } },
+        },
+    }
+    return fadeBoxTemplate
+end
+
+local function boxTemplate()
+    local style = CONFIG.boxStyle
+    if style == 'ir' or (style == 'auto' and haveFadeTextures()) then
+        return getFadeBox()
+    end
+    return I.MWUI.templates.boxTransparentThick
 end
 
 local function destroyPanel()
@@ -276,7 +457,9 @@ local function refresh()
     local order, byTopic, disposition = evaluate(currentActor)
     if #order == 0 then return end
 
+    local minWidth = math.floor(ui.screenSize().x * CONFIG.minWidth)
     local rows = {
+        { props = { size = v2(minWidth, 0) } }, -- keeps the panel as wide as the topic column
         text('Requirements', HEADER),
         text('Disposition: ' .. disposition, HEADER),
     }
@@ -288,6 +471,11 @@ local function refresh()
                 for _, l in ipairs(lines) do
                     rows[#rows + 1] = text('   ' .. l.text, l.met and MET or UNMET)
                 end
+            end
+        elseif CONFIG.blurStyle == 'smear' then
+            rows[#rows + 1] = smear(topic, NORMAL, 0)
+            for _, l in ipairs(t[1]) do
+                rows[#rows + 1] = smear('   ' .. l.text, NORMAL, 0)
             end
         elseif CONFIG.blurStyle == 'bars' then
             rows[#rows + 1] = smudge(#topic, 0)
@@ -301,10 +489,10 @@ local function refresh()
 
     panel = ui.create {
         layer = 'Windows',
-        template = I.MWUI.templates.boxTransparentThick,
+        template = boxTemplate(),
         props = {
-            relativePosition = util.vector2(CONFIG.position.x, CONFIG.position.y),
-            anchor = util.vector2(CONFIG.anchor.x, CONFIG.anchor.y),
+            relativePosition = v2(CONFIG.position.x, CONFIG.position.y),
+            anchor = v2(CONFIG.anchor.x, CONFIG.anchor.y),
         },
         content = ui.content {
             { type = ui.TYPE.Flex, props = { horizontal = false }, content = ui.content(rows) },
@@ -334,11 +522,35 @@ local function onUiModeChanged(data)
     end
 end
 
-local function onDialogueResponse()
+-- Remember topics whose names appear in NPC speech, then redraw.
+local function onDialogueResponse(e)
+    if index and e and e.recordId and core.dialogue[e.type] then
+        pcall(function()
+            local rec = core.dialogue[e.type].records[e.recordId]
+            if rec then
+                for _, info in ipairs(rec.infos) do
+                    if info.id == e.infoId then
+                        scanText(info.text)
+                        break
+                    end
+                end
+            end
+        end)
+    end
     if panel or currentActor then safeRefresh() end
 end
 
+local function onSave()
+    return { learned = learned }
+end
+
+local function onLoad(data)
+    learned = data and data.learned or {}
+    seeded = false
+end
+
 return {
+    engineHandlers = { onSave = onSave, onLoad = onLoad },
     eventHandlers = {
         UiModeChanged = onUiModeChanged,
         DialogueResponse = onDialogueResponse,
