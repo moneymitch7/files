@@ -267,7 +267,7 @@ local function refresh()
 
     panel = ui.create {
         layer = 'Windows',
-        template = I.MWUI.templates.boxTransparent,
+        template = I.MWUI.templates.boxTransparentThick,
         props = {
             relativePosition = util.vector2(CONFIG.position.x, CONFIG.position.y),
             anchor = util.vector2(CONFIG.anchor.x, CONFIG.anchor.y),
