@@ -216,7 +216,13 @@ end
 -- UI
 ---------------------------------------------------------------------------
 
-local HEADER = util.color.rgb(0.87, 0.79, 0.62)
+-- Use the game's own UI colours so the panel follows whatever UI mods set.
+local function gmstColor(name, fallback)
+    local ok, c = pcall(function() return util.color.commaString(core.getGMST(name)) end)
+    return ok and c or fallback
+end
+local HEADER = gmstColor('FontColor_color_header', util.color.rgb(0.87, 0.79, 0.62))
+local NORMAL = gmstColor('FontColor_color_normal', util.color.rgb(0.79, 0.65, 0.38))
 local UNMET = util.color.rgb(0.92, 0.42, 0.34)
 local MET = util.color.rgb(0.52, 0.82, 0.52)
 local HINT = util.color.rgb(0.55, 0.52, 0.47)
@@ -248,7 +254,7 @@ local function refresh()
     for _, topic in ipairs(order) do
         local t = byTopic[topic]
         if t.revealed or CONFIG.unrevealedTopics == 'show' then
-            rows[#rows + 1] = text(topic, HEADER)
+            rows[#rows + 1] = text(topic, NORMAL)
             for _, lines in ipairs(t) do
                 for _, l in ipairs(lines) do
                     rows[#rows + 1] = text('   ' .. l.text, l.met and MET or UNMET)
@@ -261,7 +267,7 @@ local function refresh()
 
     panel = ui.create {
         layer = 'Windows',
-        template = I.MWUI.templates.boxTransparentThick,
+        template = I.MWUI.templates.boxTransparent,
         props = {
             relativePosition = util.vector2(CONFIG.position.x, CONFIG.position.y),
             anchor = util.vector2(CONFIG.anchor.x, CONFIG.anchor.y),
