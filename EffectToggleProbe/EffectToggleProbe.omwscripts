@@ -1,0 +1,3 @@
+# Effect Toggle Probe: throwaway diagnostic for a future "toggle constant effects" mod.
+PLAYER: scripts/EffectToggleProbe/player.lua
+GLOBAL: scripts/EffectToggleProbe/global.lua
