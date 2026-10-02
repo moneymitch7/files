@@ -1,5 +1,5 @@
--- Watches the player's active spells. When the shrine spell appears, tell nearby actors;
--- the ones that are following the player apply the same spell to themselves (actor.lua).
+-- Watches the player's active spells. When the shrine spell appears, hand the nearby actors to
+-- global.lua, which attaches actor.lua to them just long enough to apply the spell to followers.
 local self = require('openmw.self')
 local core = require('openmw.core')
 local nearby = require('openmw.nearby')
@@ -18,51 +18,72 @@ local CONFIG = {
     debug = false,
 }
 
+local radiusSq = CONFIG.radius * CONFIG.radius
+local patterns = {}
+for i, pat in ipairs(CONFIG.namePatterns) do patterns[i] = pat:lower() end
+
+-- Spell ids to share, resolved once instead of string-matching names on every poll.
 local wantedIds = {}
-for _, id in ipairs(CONFIG.spellIds) do wantedIds[id:lower()] = true end
-
-local seen = {}   -- activeSpellId -> true, so each cast is shared once
-local timer = 0
-
-local function matches(spellId)
-    spellId = spellId:lower()
-    if wantedIds[spellId] then return true end
-    local rec = core.magic.spells.records[spellId]
-    local name = rec and rec.name and rec.name:lower()
-    if not name then return false end
-    for _, pat in ipairs(CONFIG.namePatterns) do
-        if name:find(pat:lower(), 1, true) then return true end
+local function buildWantedIds()
+    wantedIds = {}
+    for _, id in ipairs(CONFIG.spellIds) do wantedIds[id:lower()] = true end
+    for _, rec in ipairs(core.magic.spells.records) do
+        local name = rec.name and rec.name:lower()
+        if name then
+            for _, pat in ipairs(patterns) do
+                if name:find(pat, 1, true) then
+                    wantedIds[rec.id:lower()] = true
+                    break
+                end
+            end
+        end
     end
-    return false
 end
+
+local seen = {}   -- activeSpellId -> scan generation it was last present in, so each cast is shared once
+local generation = 0
+local timer = 0
 
 local function share(spellId)
     local rec = core.magic.spells.records[spellId]
     local effects = {}
     if rec then for i = 1, #rec.effects do effects[i] = i - 1 end end   -- 0-based effect indexes
     local pos = self.position
+    local px, py, pz = pos.x, pos.y, pos.z
+    local actors = {}
     for _, actor in ipairs(nearby.actors) do
-        if actor ~= self.object and (actor.position - pos):length() <= CONFIG.radius then
-            actor:sendEvent('AlmsiviCompanions_Share', { spellId = spellId, effects = effects, caster = self.object })
+        if actor ~= self.object then
+            local p = actor.position
+            local dx, dy, dz = p.x - px, p.y - py, p.z - pz
+            if dx * dx + dy * dy + dz * dz <= radiusSq then actors[#actors + 1] = actor end
         end
+    end
+    if #actors > 0 then
+        core.sendGlobalEvent('AlmsiviCompanions_Share',
+            { spellId = spellId, effects = effects, caster = self.object, actors = actors })
     end
 end
 
 local function scan()
-    local current = {}
+    generation = generation + 1
     for _, spell in pairs(types.Actor.activeSpells(self)) do
-        current[spell.activeSpellId] = true
-        if not seen[spell.activeSpellId] then
-            seen[spell.activeSpellId] = true
+        local key = spell.activeSpellId
+        if seen[key] == nil then
             if CONFIG.debug then print('[AlmsiviCompanions] new active spell: ' .. tostring(spell.id)) end
-            if matches(spell.id) then share(spell.id) end
+            local id = spell.id:lower()
+            if wantedIds[id] then share(id) end
         end
+        seen[key] = generation
     end
-    seen = current   -- forget expired spells so a later cast counts as new
+    for key, gen in pairs(seen) do   -- forget expired spells so a later cast counts as new
+        if gen ~= generation then seen[key] = nil end
+    end
 end
 
 return {
     engineHandlers = {
+        onInit = buildWantedIds,
+        onLoad = buildWantedIds,
         onUpdate = function(dt)
             timer = timer + dt
             if timer < CONFIG.interval then return end

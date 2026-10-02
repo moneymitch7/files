@@ -1,3 +1,5 @@
 # Almsivi Companions: shrine blessing "Almsivi Restoration" also applies to your followers.
 PLAYER: scripts/AlmsiviCompanions/player.lua
-NPC, CREATURE: scripts/AlmsiviCompanions/actor.lua
+GLOBAL: scripts/AlmsiviCompanions/global.lua
+# actor.lua is attached on demand by global.lua and removed again once it has run.
+NPC, CREATURE, CUSTOM: scripts/AlmsiviCompanions/actor.lua
