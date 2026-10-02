@@ -1,0 +1,3 @@
+# Almsivi Companions: shrine blessing "Almsivi Restoration" also applies to your followers.
+PLAYER: scripts/AlmsiviCompanions/player.lua
+NPC, CREATURE: scripts/AlmsiviCompanions/actor.lua
