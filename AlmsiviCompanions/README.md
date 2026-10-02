@@ -6,7 +6,7 @@ When you receive the shrine's **Almsivi Restoration** blessing, your followers (
 Add this folder as a `data=` path and `content=AlmsiviCompanions.omwscripts` to `openmw.cfg`. Needs OpenMW 0.49+ (active spell `add` from Lua).
 
 ## How it works
-`player.lua` checks your active spells every 0.5s. When a new one matches (by spell id or name), it sends an event to nearby actors; `actor.lua` on each follower applies the spell to itself.
+`player.lua` resolves the matching spell ids once at load, then checks your active spells every 0.5s. When a new one matches, it passes the actors within range to `global.lua`, which attaches `actor.lua` to them on demand. Each actor applies the spell to itself if it is following you, then `global.lua` removes the script again (with a 5s fallback), so no per-actor script runs the rest of the time.
 
 ## Settings
 `CONFIG` at the top of `scripts/AlmsiviCompanions/player.lua`: `spellIds`, `namePatterns`, `radius`, `interval`, `debug`.
